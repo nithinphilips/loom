@@ -38,14 +38,29 @@ def update():
     if not module_dir.endswith('/'): module_dir+='/'
     upload_dir(module_dir, '/etc/puppet/modules', use_sudo=True)
 
+    # Install local manifest
+    manifests_dir = env.get('puppet_manifest_dir', 'manifests/')
+    if not manifests_dir.endswith('/'): manifests_dir+='/'
+    upload_dir(manifests_dir, '/etc/puppet/manifests', use_sudo=True)
+
+    # Upload any required files
+    files_dir = env.get('puppet_files_dir', 'files/')
+    if not files_dir.endswith('/'): files_dir+='/'
+    if os.path.exists(files_dir):
+        upload_dir(files_dir, '/tmp/puppet-files')
+        # Upload fileserver configs
+        upload_template(os.path.join(files_path, 'puppet/fileserver.conf'), '/etc/puppet/fileserver.conf', {
+            'filedir': '/tmp/puppet-files',
+        }, use_sudo=True)
+
     # Install vendor modules
     put('Puppetfile', '/etc/puppet/Puppetfile', use_sudo=True)
     with cd('/etc/puppet'):
         sudo('librarian-puppet install --path /etc/puppet/vendor')
 
     # Install site.pp
-    sudo('mkdir -p /etc/puppet/manifests')
-    put(StringIO(generate_site_pp()), '/etc/puppet/manifests/site.pp', use_sudo=True)
+    #sudo('mkdir -p /etc/puppet/manifests')
+    #put(StringIO(generate_site_pp()), '/etc/puppet/manifests/site.pp', use_sudo=True)
 
 
 @task
@@ -73,17 +88,17 @@ def update_configs():
 
 def _gem_install(gem, version=None):
     version = '-v {version}'.format(version=version) if version else ''
-    return ' '.join('gem install {gem} {version} --no-ri --no-rdoc'.format(gem=gem, version=version).split())
+    return ' '.join('gem install --no-user-install {gem} {version} --no-ri --no-rdoc'.format(gem=gem, version=version).split())
 
 @task
 def install():
     """
     Install Puppet and its configs without any agent or master.
     """
-    sudo('apt-get update -qq')
+    sudo('pacman -Sy')
     with settings(warn_only=True):
-        sudo('apt-get -y -q install rubygems')
-    sudo('apt-get -y -q install ruby ruby-dev git')
+        _pacman_install('rubygems')
+    _pacman_install('ruby git')
 
     puppet_version = env.get('loom_puppet_version')
     sudo(_gem_install('puppet', version=puppet_version))
@@ -124,8 +139,10 @@ def apply():
     """
     Apply puppet locally
     """
+    user_manifest = env.get('puppet_manifest_file', 'site.pp')
 
-    sudo('HOME=/root puppet apply /etc/puppet/manifests/site.pp')
+    manifest = '/etc/puppet/manifests/'  + user_manifest
+    sudo('HOME=/root puppet apply ' + manifest + ' --fileserverconfig /etc/puppet/fileserver.conf ')
 
 
 @task
@@ -134,5 +151,8 @@ def force():
     """
     Force puppet agent run
     """
-
     sudo('HOME=/root puppet agent --onetime --no-daemonize --verbose --waitforcert 5')
+
+
+def _pacman_install(pkg_name):
+    sudo('pacman --needed --noconfirm -Sy ' + pkg_name)
