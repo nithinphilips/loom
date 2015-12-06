@@ -140,6 +140,7 @@ def apply():
     Apply puppet locally
     """
     user_manifest = env.get('puppet_manifest_file', 'site.pp')
+
     manifest = '/etc/puppet/manifests/'  + user_manifest
     sudo('HOME=/root puppet apply ' + manifest + ' --fileserverconfig /etc/puppet/fileserver.conf ')
 
@@ -154,4 +155,4 @@ def force():
 
 
 def _pacman_install(pkg_name):
-    sudo('pacman --needed --noconfirm -S ' + pkg_name)
+    sudo('pacman --needed --noconfirm -Sy ' + pkg_name)
