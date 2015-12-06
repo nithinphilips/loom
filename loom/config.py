@@ -1,4 +1,4 @@
-from fabric.api import env, run, sudo, settings, hide
+from fabric.api import env, run, settings, hide
 
 # Default system user
 env.user = 'ubuntu'
@@ -35,11 +35,11 @@ def current_roles():
 
 def has_puppet_installed():
     with settings(hide('warnings', 'running', 'stdout', 'stderr'), warn_only=True):
-        result = sudo('which puppet')
+        result = run('which puppet')
     return result.succeeded
 
 
 def has_librarian_installed():
     with settings(hide('warnings', 'running', 'stdout', 'stderr'), warn_only=True):
-        librarian = sudo('which librarian-puppet')
+        librarian = run('which librarian-puppet')
     return librarian.succeeded
