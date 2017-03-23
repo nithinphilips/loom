@@ -23,7 +23,6 @@ def generate_site_pp():
     site = ''.join('include "roles::%s"\n' % role for role in sorted(current_roles()))
     return site
 
-
 @task
 @requires_puppet
 def update():
@@ -33,19 +32,29 @@ def update():
     if not current_roles():
         abort('Host "%s" has no roles. Does it exist in this environment?' % env.host_string)
 
-    # Install local modules
-    module_dir = env.get('puppet_module_dir', 'modules/')
-    if not module_dir.endswith('/'): module_dir+='/'
-    upload_dir(module_dir, '/etc/puppet/modules', use_sudo=True)
+    # Install local modules, manifests, hiera etc.
+    code_dir = env.get('puppet_code_dir', 'code/')
+    if not code_dir.endswith('/'): code_dir+='/'
+    upload_dir(code_dir, '/etc/puppetlabs/code/', use_sudo=True)
+
+    # Upload any required files and setup the fileserver
+    files_dir = env.get('puppet_files_dir', 'files/')
+    if not files_dir.endswith('/'): files_dir+='/'
+    if os.path.exists(files_dir):
+        upload_dir(files_dir, '/tmp/puppet-files')
+        # Upload fileserver configs
+        upload_template(os.path.join(files_path, 'puppet/fileserver.conf'), '/etc/puppetlabs/puppet/fileserver.conf', {
+            'filedir': '/tmp/puppet-files',
+        }, use_sudo=True)
 
     # Install vendor modules
-    put('Puppetfile', '/etc/puppet/Puppetfile', use_sudo=True)
-    with cd('/etc/puppet'):
-        sudo('librarian-puppet install --path /etc/puppet/vendor')
+    put('Puppetfile', '/etc/puppetlabs/puppet/Puppetfile', use_sudo=True)
+    with cd('/etc/puppetlabs/puppet'):
+        sudo('librarian-puppet install --path /etc/puppetlabs/code/modules')
 
     # Install site.pp
-    sudo('mkdir -p /etc/puppet/manifests')
-    put(StringIO(generate_site_pp()), '/etc/puppet/manifests/site.pp', use_sudo=True)
+    sudo('mkdir -p /etc/puppetlabs/code/manifests')
+    put(StringIO(generate_site_pp()), '/etc/puppetlabs/code/manifests/site.pp', use_sudo=True)
 
 
 @task
@@ -53,22 +62,22 @@ def update_configs():
     """
     Upload puppet configs and manifests
     """
-    sudo('mkdir -p /etc/puppet')
+    sudo('mkdir -p /etc/puppetlabs/puppet')
     # Allow the puppet master to automatically sign certificates
     if env.get('loom_puppet_autosign'):
-        put(StringIO('*'), '/etc/puppet/autosign.conf', use_sudo=True)
+        put(StringIO('*'), '/etc/puppetlabs/puppet/autosign.conf', use_sudo=True)
     else:
-        put(StringIO(''), '/etc/puppet/autosign.conf', use_sudo=True)
+        put(StringIO(''), '/etc/puppetlabs/puppet/autosign.conf', use_sudo=True)
 
     # Upload Puppet configs
-    upload_template(os.path.join(files_path, 'puppet/puppet.conf'), '/etc/puppet/puppet.conf', {
+    upload_template(os.path.join(files_path, 'puppet/puppet.conf'), '/etc/puppetlabs/puppet/puppet.conf', {
         'server': get_puppetmaster_host() or '',
         'certname': get_puppetmaster_host() or '',
         'dns_alt_names': get_puppetmaster_host() or '',
         'environment': env.environment,
     }, use_sudo=True)
-    put(os.path.join(files_path, 'puppet/auth.conf'), '/etc/puppet/auth.conf', use_sudo=True)
-    put(os.path.join(files_path, 'puppet/hiera.yaml'), '/etc/puppet/hiera.yaml', use_sudo=True)
+    put(os.path.join(files_path, 'puppet/auth.conf'), '/etc/puppetlabs/puppet/auth.conf', use_sudo=True)
+    put(os.path.join(files_path, 'puppet/hiera.yaml'), '/etc/puppetlabs/puppet/hiera.yaml', use_sudo=True)
 
 
 def _gem_install(gem, version=None):
@@ -93,7 +102,7 @@ def install():
 
     # http://docs.puppetlabs.com/guides/installation.html
     sudo('puppet resource group puppet ensure=present')
-    sudo("puppet resource user puppet ensure=present gid=puppet shell='/sbin/nologin'")
+    sudo("puppet resource user puppet ensure=present gid=puppet shell='/bin/false'")
     execute(update_configs)
 
 
@@ -124,8 +133,7 @@ def apply():
     """
     Apply puppet locally
     """
-
-    sudo('HOME=/root puppet apply /etc/puppet/manifests/site.pp')
+    sudo('HOME=/root puppet apply /etc/puppetlabs/code/manifests/site.pp')
 
 
 @task
@@ -134,5 +142,4 @@ def force():
     """
     Force puppet agent run
     """
-
     sudo('HOME=/root puppet agent --onetime --no-daemonize --verbose --waitforcert 5')
